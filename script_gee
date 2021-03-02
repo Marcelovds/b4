@@ -1,0 +1,112 @@
+// table é o shapefile da área de interesse
+// geometry é o poligono cobrindo toda a área ao redor de table
+
+// função para calcular psri
+var calcula_psri = function (image)
+{
+var psri = image.expression(
+    '1-((red-blue)/rededge)',
+    {
+        red: image.select('B4'),    // 665nm, RED 
+        blue: image.select('B2'),    // 496, Blue
+        rededge: image.select('B6')    // 740, RedEdge
+    });
+image = image.addBands(psri.rename('psri'));
+
+//var psri = img.expression('(b2-b4)/b6');
+
+return  image;
+};
+
+
+
+
+/**
+ * Function to mask clouds using the Sentinel-2 QA band
+ * @param {ee.Image} image Sentinel-2 image
+ * @return {ee.Image} cloud masked Sentinel-2 image
+ */
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000);
+}
+
+var dataset = ee.ImageCollection('COPERNICUS/S2_SR')
+                  .filterDate('2020-08-01', '2021-01-02')
+                  // Pre-filter to get less cloudy granules.
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',10))
+                  .map(maskS2clouds).map(calcula_psri);
+
+var visualization = {
+  min: 0.0,
+  max: 0.3,
+  bands: ['B4', 'B3', 'B2'],
+};
+
+var visualizationB4 = {
+  min: 0.0,
+  max: 0.3,
+  bands: ['B4'],
+};
+
+
+var palette = ['FF0000', 'FF0000', 'FFFF00', '8ADD60','00FF00'];
+//var b2b3b4 = ee.Image(dataset.select(['B2', 'B3', 'B4']));
+
+//var b4 = dataset.select(['B4']).mean().clipToCollection(table);
+//var psri = dataset.select(['psri']).mean().clipToCollection(table);
+
+var b4 = dataset.select(['B4']).mean();
+var psri = dataset.select(['psri']).mean();
+
+var img = dataset.mean();
+
+//Map.setCenter(-51.23,-20, 11); // tres lagoas
+Map.setCenter(-42.9,-22.4,11);  // Teresopolis
+
+
+Map.addLayer(dataset.mean(), visualization, 'RGB',false);
+Map.addLayer(b4,visualizationB4,'B4');
+Map.addLayer(psri,{min:0,max:1,palette:palette},'PSRI');
+//Map.addLayer(psri);
+
+//Map.addLayer(table,{color: 'ff8c00'},'ROI', true);
+//Map.addLayer(table,{color:'white'},'fazendas',true,0.5);
+
+Export.image.toDrive(
+      {
+        'image':psri, 
+        //'image':clippedndwi,
+        'description': 'PSRI_export', 
+        'folder': 'plataforma', 
+        'fileNamePrefix': '20210102_PSRI30d_ROI',
+        'region': geometry, 
+        'scale': 30, 
+        'maxPixels': 1e13,
+        'fileFormat': 'GeoTIFF',
+        'crs':'EPSG:4326'
+      }
+);
+
+Export.image.toDrive(
+      {
+        'image':b4, 
+        'description': 'B4_export', 
+        'folder': 'plataforma', 
+        'fileNamePrefix': '20210102_B430d_ROI',
+        'region': geometry, 
+        'scale': 30, 
+        'maxPixels': 1e13,
+        'fileFormat': 'GeoTIFF',
+        'crs':'EPSG:4326'
+      }
+); 
